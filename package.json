@@ -1,0 +1,23 @@
+{
+  "name": "v5-code-blocks-on-render-sandboxes",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Run user-written TypeScript workflow blocks in Render Sandboxes",
+  "type": "module",
+  "engines": {
+    "node": ">=22.9"
+  },
+  "scripts": {
+    "setup": "tsx --env-file-if-exists=.env src/setup.ts",
+    "demo": "tsx --env-file-if-exists=.env src/demo.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@renderinc/sdk": "1.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
