@@ -21,7 +21,7 @@ const ORDERS = {
 async function main() {
   let failures = 0;
 
-  section("A workflow run: two code blocks in parallel, each in its own sandbox");
+  section("A workflow run: code blocks in parallel, each in its own sandbox");
   failures += await runAll([
     {
       name: "transform (no network)",
@@ -40,6 +40,24 @@ async function main() {
       check: (r) => {
         const { repo, stars } = output<{ repo: string; stars: number }>(r);
         return `${repo} has ${stars} stars`;
+      },
+    },
+    {
+      name: "zod-axios (allowlist: api.github.com)",
+      block: await example("zod-axios.mts", { allowedDomains: ["api.github.com"] }),
+      input: { repo: "colinhacks/zod" },
+      check: (r) => {
+        const { repo, stars, license } = output<{ repo: string; stars: number; license: string | null }>(r);
+        return `${repo}: ${stars} stars, ${license} license`;
+      },
+    },
+    {
+      name: "zod-axios with invalid input",
+      block: await example("zod-axios.mts", { allowedDomains: ["api.github.com"] }),
+      input: { repo: "not a repo" },
+      check: (r) => {
+        expect(!r.ok && r.error?.includes("owner/name") === true, `expected a zod error, got ${r.error}`);
+        return "rejected by zod: repo must look like owner/name";
       },
     },
   ]);

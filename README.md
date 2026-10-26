@@ -9,7 +9,7 @@ Workflow engine (your backend: holds the Render API key)
 Sandbox per block run (microVM, from the "v5-ts-runner" snapshot)
    ├─ network: deny-all, or only the block's allowedDomains (HTTPS)
    ├─ credentials: brokered outside the VM, never visible to the code
-   └─ /tmp/block.mts + input.json → harness → output.json
+   └─ block.mts + input.json → harness → output.json
    │
    ▼  output, logs, timedOut → terminated
 ```
@@ -20,9 +20,9 @@ Sandbox per block run (microVM, from the "v5-ts-runner" snapshot)
 | --- | --- |
 | `src/runCodeBlock.ts` | The function you copy into your builder. |
 | `src/harness.mts` | Runs inside the sandbox: loads the block, calls it, writes `output.json`. |
-| `src/setup.ts` | One-time setup: installs `tsx` in a sandbox and saves it as a snapshot. |
+| `src/setup.ts` | One-time setup: installs `tsx` and the block libraries (`zod`, `axios`) in a sandbox and saves it as a snapshot. |
 | `src/demo.ts` | Runs the examples and checks every outcome. |
-| `examples/` | Sample user code: two normal blocks, one brokered block, five hostile ones. |
+| `examples/` | Sample user code: three normal blocks, one brokered block, five hostile ones. |
 
 ## Run it
 
@@ -37,7 +37,7 @@ npm run demo
 
 The demo:
 
-1. **Runs two blocks in parallel, each in its own sandbox.** One is a pure transform with no network access. The other calls `api.github.com`, the only domain on its allowlist.
+1. **Runs blocks in parallel, each in its own sandbox.** A pure transform runs with no network access. Two blocks call `api.github.com`, the only domain on their allowlist: one with `fetch`, the other with axios, validating its input and the response with zod. The zod block also runs with invalid input to show how a validation error comes back.
 2. **Runs a block that calls OpenAI with no key in its code or environment.** The credential broker adds the key as matching requests leave the sandbox. This needs one-time setup (see below).
 3. **Runs hostile blocks and confirms each one is contained:**
    - dumping the environment finds no secrets;
@@ -52,11 +52,19 @@ The demo:
 A block is a TypeScript module that default-exports a function of its input. It can be async. Its return value must be JSON-serializable.
 
 ```ts
-export default async function (input: { repo: string }) {
-  const res = await fetch(`https://api.github.com/repos/${input.repo}`);
-  return { stars: (await res.json()).stargazers_count };
+import axios from "axios";
+import { z } from "zod";
+
+const Input = z.object({ repo: z.string() });
+
+export default async function (input: unknown) {
+  const { repo } = Input.parse(input);
+  const { data } = await axios.get(`https://api.github.com/repos/${repo}`);
+  return { stars: data.stargazers_count };
 }
 ```
+
+Blocks can import Node built-ins and the libraries preinstalled in the snapshot. That list is `RUNNER_PACKAGES` in `src/runCodeBlock.ts`, currently `zod` and `axios`. Blocks can't install packages themselves, because their sandboxes can't reach the npm registry. To offer another library, add it to `RUNNER_PACKAGES` and rerun `npm run setup`. If a block throws, including on a failed zod `parse`, the result has `ok: false` and the error message.
 
 In your builder:
 

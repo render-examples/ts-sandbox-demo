@@ -7,13 +7,16 @@ import {
 } from "@renderinc/sdk";
 import type { SandboxesClient, SandboxNetworkPolicy } from "@renderinc/sdk/experimental";
 
-/** Filesystem snapshot with Node and tsx preinstalled. Built by `npm run setup`. */
+/** Filesystem snapshot with Node, tsx, and the block libraries preinstalled. Built by `npm run setup`. */
 export const RUNNER_SNAPSHOT = process.env.RUNNER_SNAPSHOT ?? "v5-ts-runner";
 export const RUNNER_DIR = "/opt/runner";
+/** Libraries blocks can import. Blocks can't install their own; changing this requires `npm run setup`. */
+export const RUNNER_PACKAGES = ["tsx@4", "zod@4", "axios@1"];
 
-const BLOCK_PATH = "/tmp/block.mts";
-const INPUT_PATH = "/tmp/input.json";
-const OUTPUT_PATH = "/tmp/output.json";
+// The block lives in RUNNER_DIR so its imports resolve from RUNNER_DIR/node_modules.
+export const BLOCK_PATH = `${RUNNER_DIR}/block.mts`;
+export const INPUT_PATH = "/tmp/input.json";
+export const OUTPUT_PATH = "/tmp/output.json";
 const DEFAULT_TIMEOUT_SECONDS = 10;
 const MAX_LOG_CHARS = 64 * 1024;
 // GNU `timeout` exits 124 when it stops the command, or 137 if it has to SIGKILL it.

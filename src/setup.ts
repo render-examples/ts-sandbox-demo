@@ -2,10 +2,14 @@
 // from a ready runtime instead of running `npm install`. Re-run before the snapshot expires.
 import { readFile } from "node:fs/promises";
 import {
+  BLOCK_PATH,
   blockCommand,
   execCollect,
+  INPUT_PATH,
   networkPolicyFor,
+  OUTPUT_PATH,
   RUNNER_DIR,
+  RUNNER_PACKAGES,
   RUNNER_SNAPSHOT,
   sandboxes,
   sleep,
@@ -27,8 +31,8 @@ async function main() {
     await step(sandbox.id, "Check Node", "node --version && npm --version");
     await step(
       sandbox.id,
-      "Install tsx",
-      `mkdir -p ${RUNNER_DIR} && cd ${RUNNER_DIR} && npm init -y >/dev/null && npm install --no-audit --no-fund tsx@4`,
+      `Install ${RUNNER_PACKAGES.join(", ")}`,
+      `mkdir -p ${RUNNER_DIR} && cd ${RUNNER_DIR} && npm init -y >/dev/null && npm install --no-audit --no-fund ${RUNNER_PACKAGES.join(" ")}`,
     );
 
     const harness = await readFile(new URL("./harness.mts", import.meta.url));
@@ -37,12 +41,16 @@ async function main() {
     await withRetry(() =>
       sandboxes().upload(
         sandbox.id,
-        "/tmp/block.mts",
-        "export default (input: { name: string }) => `hello, ${input.name}`;",
+        BLOCK_PATH,
+        'import { z } from "zod";\nexport default (input: unknown) => `hello, ${z.object({ name: z.string() }).parse(input).name}`;',
       ),
     );
-    await withRetry(() => sandboxes().upload(sandbox.id, "/tmp/input.json", '{"name":"v5"}'));
-    await step(sandbox.id, "Smoke test", `${blockCommand(10)} && cat /tmp/output.json && rm /tmp/*.mts /tmp/*.json`);
+    await withRetry(() => sandboxes().upload(sandbox.id, INPUT_PATH, '{"name":"v5"}'));
+    await step(
+      sandbox.id,
+      "Smoke test",
+      `${blockCommand(10)} && cat ${OUTPUT_PATH} && rm ${BLOCK_PATH} ${INPUT_PATH} ${OUTPUT_PATH}`,
+    );
 
     let snapshot = await sandboxes().snapshots.create({
       sandboxId: sandbox.id,
