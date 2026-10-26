@@ -1,15 +1,15 @@
 # Run user-written TypeScript in Render Sandboxes
 
-A minimal pattern for running end-user code inside a workflow builder. Each code block runs in its own Render Sandbox, a Firecracker microVM. Your workflow engine stays where it is. Where you would have called `node:vm`, call `runCodeBlock()`.
+A minimal pattern for running end-user code inside a workflow builder. Each code block in your builder runs in its own Render Sandbox, a Firecracker microVM. Your workflow engine stays where it is. Where you would have called `node:vm`, call `runCodeBlock()`.
 
 ```
 Workflow engine (your backend: holds the Render API key)
-   │  runCodeBlock(block, input)
+   │  runCodeBlock({ code, allowedDomains }, input)
    ▼
-Sandbox per block run (microVM, from the "v5-ts-runner" snapshot)
-   ├─ network: deny-all, or only the block's allowedDomains (HTTPS)
-   ├─ credentials: brokered outside the VM, never visible to the code
-   └─ block.mts + input.json → harness → output.json
+One sandbox per run (microVM, from the "v5-ts-runner" snapshot)
+   ├─ network: deny-all, or only its allowedDomains (HTTPS)
+   ├─ credentials: brokered outside the VM, never visible to user code
+   └─ user code + input.json → harness → output.json
    │
    ▼  output, logs, timedOut → terminated
 ```
@@ -19,10 +19,10 @@ Sandbox per block run (microVM, from the "v5-ts-runner" snapshot)
 | Path | Purpose |
 | --- | --- |
 | `src/runCodeBlock.ts` | The function you copy into your builder. |
-| `src/harness.mts` | Runs inside the sandbox: loads the block, calls it, writes `output.json`. |
-| `src/setup.ts` | One-time setup: installs `tsx` and the block libraries (`zod`, `axios`) in a sandbox and saves it as a snapshot. |
+| `src/harness.mts` | Runs inside the sandbox: loads the user code, calls it, writes `output.json`. |
+| `src/setup.ts` | One-time setup: installs `tsx` and the libraries user code can import (`zod`, `axios`) in a sandbox and saves it as a snapshot. |
 | `src/demo.ts` | Runs the examples and checks every outcome. |
-| `examples/` | Sample user code: three normal blocks, one brokered block, five hostile ones. |
+| `examples/` | Sample user code: three well-behaved examples, one that uses a brokered credential, and five hostile ones. |
 
 ## Run it
 
@@ -37,19 +37,23 @@ npm run demo
 
 The demo:
 
-1. **Runs blocks in parallel, each in its own sandbox.** A pure transform runs with no network access. Two blocks call `api.github.com`, the only domain on their allowlist: one with `fetch`, the other with axios, validating its input and the response with zod. The zod block also runs with invalid input to show how a validation error comes back.
-2. **Runs a block that calls OpenAI with no key in its code or environment.** The credential broker adds the key as matching requests leave the sandbox. This needs one-time setup (see below).
-3. **Runs hostile blocks and confirms each one is contained:**
+1. **Runs several examples in parallel, each in its own sandbox:**
+   - a pure transform with no network access;
+   - a `fetch` call to `api.github.com`, the only domain on its allowlist;
+   - the same call made with axios, with input and response validated by zod;
+   - the zod example again with invalid input, to show how a validation error comes back.
+2. **Calls OpenAI with no key in the code or its environment.** The credential broker adds the key as matching requests leave the sandbox. This needs one-time setup (see below).
+3. **Runs hostile code and confirms each attempt is contained:**
    - dumping the environment finds no secrets;
    - posting data to a domain that isn't allowlisted is blocked;
    - an infinite loop is stopped at its time limit;
    - a `node:vm` escape lands in a disposable VM with none of the host's files;
    - `rm -rf /` destroys only its own sandbox.
-4. **Runs a normal block again** to show the next run still gets a clean sandbox.
+4. **Runs a well-behaved example again** to show the next run still gets a clean sandbox.
 
-## Writing a block
+## Writing user code
 
-A block is a TypeScript module that default-exports a function of its input. It can be async. Its return value must be JSON-serializable.
+User code is a TypeScript module that default-exports a function of its input. The function can be async, and its return value must be JSON-serializable.
 
 ```ts
 import axios from "axios";
@@ -64,7 +68,9 @@ export default async function (input: unknown) {
 }
 ```
 
-Blocks can import Node built-ins and the libraries preinstalled in the snapshot. That list is `RUNNER_PACKAGES` in `src/runCodeBlock.ts`, currently `zod` and `axios`. Blocks can't install packages themselves, because their sandboxes can't reach the npm registry. To offer another library, add it to `RUNNER_PACKAGES` and rerun `npm run setup`. If a block throws, including on a failed zod `parse`, the result has `ok: false` and the error message.
+- **Imports:** Node built-ins plus the libraries preinstalled in the snapshot, currently `zod` and `axios`. User code can't install packages itself, because its sandbox can't reach the npm registry.
+- **Adding a library:** add it to `RUNNER_PACKAGES` in `src/runCodeBlock.ts`, then rerun `npm run setup`.
+- **Errors:** if the code throws, including on a failed zod `parse`, the result has `ok: false` and the error message.
 
 In your builder:
 
@@ -87,13 +93,13 @@ To configure the rule the demo expects, open your sandbox group in the Render Da
 | Key | `OPENAI_API_KEY` |
 | Preset | OpenAI (`api.openai.com`, `Authorization: Bearer`) |
 | Allowed requests | `GET`, path exactly `/v1/models` |
-| Unmatched requests | Block |
+| Unmatched requests | Deny (the default) |
 
-Then set `DEMO_BROKERING=1` in `.env` and rerun the demo. The block gets `200` from `/v1/models` and is denied on `/v1/files`.
+Then set `DEMO_BROKERING=1` in `.env` and rerun the demo. The example gets `200` from `/v1/models` and is denied on `/v1/files`.
 
 Two rules apply:
 
-- **A credential doesn't grant network access.** The brokered host must also be in the block's `allowedDomains`.
+- **A credential doesn't grant network access.** The brokered host must also be in `allowedDomains`.
 - **Credentials apply to the whole group.** Use them for credentials your platform owns. Brokering each end user's own keys separately needs multiple sandbox groups or per-sandbox credential selection. Neither is available yet.
 
 ## Rules this code follows
@@ -101,7 +107,7 @@ Two rules apply:
 - **No Render API key in the sandbox.** Anything the sandbox can reach, user code can reach.
 - **Pass a network policy on every create.** A sandbox restored from a snapshot without an explicit policy comes up with no working egress.
 - **Enforce the time limit inside the sandbox** with `timeout`. Aborting `exec` from the SDK doesn't stop the remote process.
-- **Return output through a file, not stdout,** so the block's `console.log` output stays in `logs`.
+- **Return output through a file, not stdout,** so `console.log` output from user code stays in `logs`.
 - **Always terminate in `finally`.** `timeoutSeconds` on create is only a backstop.
 
 ## Limits to know
