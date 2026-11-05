@@ -18,10 +18,14 @@ One sandbox per run (microVM, from the "v5-ts-runner" snapshot)
 
 | Path | Purpose |
 | --- | --- |
-| `src/runCodeBlock.ts` | The function you copy into your builder. |
+| `src/runCodeBlock.ts` | The request-time lifecycle: create, boot, upload, execute, download, and terminate. |
 | `src/harness.mts` | Runs inside the sandbox: loads the user code, calls it, writes `output.json`. |
 | `src/setup.ts` | One-time setup: installs `tsx` and the libraries user code can import (`zod`, `axios`) in a sandbox and saves it as a snapshot. |
-| `src/demo.ts` | Runs the examples and checks every outcome. |
+| `src/runnerConfig.ts` | Snapshot contents, sandbox paths, and the command used to invoke the harness. |
+| `src/sandboxUtilities.ts` | Shared SDK client, network-policy construction, and polling delay. |
+| `src/types.ts` | The public code-block request and result types. |
+| `src/demo.ts` | A short table of contents that runs each learning-area chapter. |
+| `src/demo/` | One focused chapter per concept, plus shared reporting helpers. |
 | `examples/` | Sample user code: three well-behaved examples, one that uses a brokered credential, and five hostile ones. |
 
 ## Run it
@@ -42,14 +46,18 @@ The demo:
    - a `fetch` call to `api.github.com`, the only domain on its allowlist;
    - the same call made with axios, with input and response validated by zod;
    - the zod example again with invalid input, to show how a validation error comes back.
-2. **Calls OpenAI with no key in the code or its environment.** The credential broker adds the key as matching requests leave the sandbox. This needs one-time setup (see below).
-3. **Runs hostile code and confirms each attempt is contained:**
+2. **Blocks requests to hosts outside the sandbox's network allowlist.**
+3. **Stops an infinite loop at its wall-clock time limit.**
+4. **Runs hostile code and confirms each attempt is contained:**
    - dumping the environment finds no secrets;
-   - posting data to a domain that isn't allowlisted is blocked;
-   - an infinite loop is stopped at its time limit;
    - a `node:vm` escape lands in a disposable VM with none of the host's files;
    - `rm -rf /` destroys only its own sandbox.
-4. **Runs a well-behaved example again** to show the next run still gets a clean sandbox.
+5. **Runs a well-behaved example again** to show the next run still gets a clean sandbox.
+6. **Calls OpenAI with no key in the code or its environment.** The credential broker adds the key as matching requests leave the sandbox. This needs one-time setup (see below).
+
+For a code walkthrough, start with `src/runCodeBlock.ts`. Its numbered sections deliberately
+leave every important Sandbox SDK call visible. Read `src/harness.mts` next to see the trusted
+boundary around user code, then `src/setup.ts` to see how the reusable filesystem snapshot is built.
 
 ## Writing user code
 
@@ -69,7 +77,7 @@ export default async function (input: unknown) {
 ```
 
 - **Imports:** Node built-ins plus the libraries preinstalled in the snapshot, currently `zod` and `axios`. User code can't install packages itself, because its sandbox can't reach the npm registry.
-- **Adding a library:** add it to `RUNNER_PACKAGES` in `src/runCodeBlock.ts`, then rerun `npm run setup`.
+- **Adding a library:** add it to `RUNNER_PACKAGES` in `src/runnerConfig.ts`, then rerun `npm run setup`.
 - **Errors:** if the code throws, including on a failed zod `parse`, the result has `ok: false` and the error message.
 
 In your builder:
@@ -114,5 +122,5 @@ Two rules apply:
 
 - **SDK version.** Sandboxes are under `render.experimental.sandboxes` in `@renderinc/sdk` 1.4.0. Expect the namespace to move at GA.
 - **Allowlists are HTTPS only,** with wildcards only in the leftmost label. A sandbox's policy can't change after creation.
-- **Rate limits.** Each run makes about 10 API calls (create, status polls, two uploads, exec, download, terminate), and every exec and file operation counts against the API rate limit. `withRetry` backs off on 429s.
+- **Rate limits.** Each run makes about 10 API calls (create, status polls, two uploads, exec, download, terminate), and every exec and file operation counts against the API rate limit. A production implementation should retry safe operations after transient errors and `429` responses; this demo leaves that policy out so the execution lifecycle stays visible.
 - **Snapshot expiry.** The runner snapshot expires after Render's default lifetime, 30 days at the time of writing. Rerun `npm run setup` before then, or schedule it as a cron job.
