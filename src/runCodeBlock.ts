@@ -1,3 +1,4 @@
+import { Render } from "@renderinc/sdk";
 import {
   BLOCK_PATH,
   blockCommand,
@@ -8,7 +9,7 @@ import {
   RUNNER_SNAPSHOT,
   TIMEOUT_EXIT_CODES,
 } from "./runnerConfig.ts";
-import { getSandboxes, networkPolicyFor, sleep } from "./sandboxUtilities.ts";
+import { networkPolicyFor, sleep } from "./sandboxUtilities.ts";
 import type { BlockResult, CodeBlock, HarnessResult } from "./types.ts";
 
 export type { BlockResult, CodeBlock } from "./types.ts";
@@ -20,7 +21,7 @@ export type { BlockResult, CodeBlock } from "./types.ts";
 export async function runCodeBlock(block: CodeBlock, input: unknown): Promise<BlockResult> {
   const startedAt = Date.now();
   const timeoutSeconds = block.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
-  const sandboxes = getSandboxes();
+  const sandboxes = new Render().experimental.sandboxes;
 
   // 1. Create one isolated sandbox for this execution.
   const sandbox = await sandboxes.create({
